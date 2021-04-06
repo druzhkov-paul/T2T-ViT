@@ -43,7 +43,8 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
-        B, N, C = x.shape
+        B, N, C = original_shape = x.shape
+        C = int(C)
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
@@ -51,7 +52,7 @@ class Attention(nn.Module):
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = (attn @ v).transpose(1, 2).reshape(*original_shape)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -86,3 +87,17 @@ def get_sinusoid_encoding(n_position, d_hid):
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
     return torch.FloatTensor(sinusoid_table).unsqueeze(0)
+
+
+def get_sinusoid_encoding_pt(n_position, d_hid):
+    ''' Sinusoid position encoding table '''
+    pos = torch.arange(n_position).reshape(-1, 1).float()
+    dh = torch.pow(10000, 2 * (torch.arange(d_hid) // 2) / d_hid).reshape(1, -1).float()
+    sinusoid_table = pos / dh
+    shape = sinusoid_table.shape
+    sinusoid_table = sinusoid_table.reshape(-1, 2)
+    sinusoid_table = torch.stack([torch.sin(sinusoid_table[..., 0]), torch.cos(sinusoid_table[..., 1])], dim=1)
+    sinusoid_table = sinusoid_table.reshape(1, *shape)
+    # sinusoid_table[:, 0::2] = torch.sin(sinusoid_table[:, 0::2])  # dim 2i
+    # sinusoid_table[:, 1::2] = torch.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+    return sinusoid_table
