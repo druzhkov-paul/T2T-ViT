@@ -19,8 +19,8 @@ import torch.nn.parallel
 from collections import OrderedDict
 from contextlib import suppress
 
-from timm.models import create_model, apply_test_time_pool, load_checkpoint, is_model, list_models
 from timm.data import create_dataset, create_loader, resolve_data_config, RealLabelsImagenet
+from timm.models import create_model, apply_test_time_pool, load_checkpoint, is_model, list_models
 from timm.utils import accuracy, AverageMeter, natural_key, setup_default_logging, set_jit_legacy
 from timm.utils.onnxruntime_backend import ModelONNXRuntime
 
@@ -91,22 +91,10 @@ parser.add_argument('--no-prefetcher', action='store_true', default=False,
                     help='disable fast prefetcher')
 parser.add_argument('--pin-mem', action='store_true', default=False,
                     help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
-parser.add_argument('--channels-last', action='store_true', default=False,
-                    help='Use channels_last memory layout')
-parser.add_argument('--amp', action='store_true', default=False,
-                    help='Use AMP mixed precision. Defaults to Apex, fallback to native Torch AMP.')
-parser.add_argument('--apex-amp', action='store_true', default=False,
-                    help='Use NVIDIA Apex AMP mixed precision')
-parser.add_argument('--native-amp', action='store_true', default=False,
-                    help='Use Native Torch AMP mixed precision')
 parser.add_argument('--tf-preprocessing', action='store_true', default=False,
                     help='Use Tensorflow preprocessing pipeline (require CPU TF installed')
 parser.add_argument('--use-ema', dest='use_ema', action='store_true',
                     help='use ema version of weights if present')
-parser.add_argument('--torchscript', dest='torchscript', action='store_true',
-                    help='convert model torchscript for inference')
-parser.add_argument('--legacy-jit', dest='legacy_jit', action='store_true',
-                    help='use legacy jit mode for pytorch 1.5/1.5.1/1.6 to get back fusion performance')
 parser.add_argument('--results-file', default='', type=str, metavar='FILENAME',
                     help='Output csv file for validation results (summary)')
 parser.add_argument('--real-labels', default='', type=str, metavar='FILENAME',
@@ -117,28 +105,8 @@ parser.add_argument('--max-iter', default=None, type=int)
 
 
 def validate(args):
-    # might as well try to validate something
     args.pretrained = args.pretrained or not args.checkpoint
     args.prefetcher = not args.no_prefetcher
-    amp_autocast = suppress  # do nothing
-    if args.amp:
-        if has_native_amp:
-            args.native_amp = True
-        elif has_apex:
-            args.apex_amp = True
-        else:
-            _logger.warning("Neither APEX or Native Torch AMP is available.")
-    assert not args.apex_amp or not args.native_amp, "Only one AMP mode should be set."
-    if args.native_amp:
-        amp_autocast = torch.cuda.amp.autocast
-        _logger.info('Validating in mixed precision with native PyTorch AMP.')
-    elif args.apex_amp:
-        _logger.info('Validating in mixed precision with NVIDIA APEX AMP.')
-    else:
-        _logger.info('Validating in float32. AMP not enabled.')
-
-    if args.legacy_jit:
-        set_jit_legacy()
 
     # create model
     onnx_model = ModelONNXRuntime(args.onnx)
@@ -147,8 +115,7 @@ def validate(args):
         pretrained=args.pretrained,
         num_classes=args.num_classes,
         in_chans=3,
-        global_pool=args.gp,
-        scriptable=args.torchscript)
+        global_pool=args.gp)
 
     if args.num_classes is None:
         assert hasattr(pt_model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
@@ -162,24 +129,16 @@ def validate(args):
     if not args.no_test_pool:
         pt_model, test_time_pool = apply_test_time_pool(pt_model, data_config, use_test_size=True)
 
-    if args.torchscript:
-        torch.jit.optimized_execution(True)
-        pt_model = torch.jit.script(pt_model)
-
     criterion = nn.CrossEntropyLoss()
-    if torch.cuda.is_available() and False:
+    use_cuda = False
+    if torch.cuda.is_available():
+        use_cuda = True
         pt_model = pt_model.cuda()
-        if args.apex_amp:
-            pt_model = amp.initialize(pt_model, opt_level='O1')
-
-        if args.channels_last:
-            pt_model = pt_model.to(memory_format=torch.channels_last)
-
         if args.num_gpu > 1:
             pt_model = torch.nn.DataParallel(pt_model, device_ids=list(range(args.num_gpu)))
-
         criterion = criterion.cuda()
-    print(criterion)
+    else:
+        args.prefetcher = False
 
     dataset = create_dataset(
         root=args.data, name=args.dataset, split=args.split,
@@ -219,34 +178,18 @@ def validate(args):
 
     pt_model.eval()
     with torch.no_grad():
-        # # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
-        # input = torch.randn((args.batch_size,) + data_config['input_size']).cuda()
-        # if args.channels_last:
-        #     input = input.contiguous(memory_format=torch.channels_last)
-        # model(input)
+        # warmup, reduce variability of first batch time
+        input = torch.randn((args.batch_size,) + data_config['input_size']).cpu().numpy()
+        onnx_model(input)
         end = time.time()
-        for batch_idx, (input, target) in enumerate(loader):
-            # if args.no_prefetcher:
-            #     target = target.cuda()
-            #     input = input.cuda()
-            if args.channels_last:
-                input = input.contiguous(memory_format=torch.channels_last)
 
+        for batch_idx, (input, target) in enumerate(loader):
             # compute output
-            with amp_autocast():
-                # print(input.shape)
-                input = input.cpu().numpy()
-                target = target.cpu()
-                # print(input)
-                output = onnx_model(input)
-                # print(list(output.keys()))
-                # for k, v in output.items():
-                #     print(k)
-                #     print(v)
-                # output = next(iter(output.values()))
-                output = output['probs']
-                output = torch.from_numpy(output)
-                # print(output)
+            input = input.cpu().numpy()
+            target = target.cpu()
+            output = onnx_model(input)
+            output = output['probs']
+            output = torch.from_numpy(output)
 
             if valid_labels is not None:
                 output = output[:, valid_labels]
@@ -333,7 +276,8 @@ def main():
                 result = OrderedDict(model=args.model)
                 r = {}
                 while not r and batch_size >= args.num_gpu:
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     try:
                         args.batch_size = batch_size
                         print('Validating with batch size: %d' % args.batch_size)
