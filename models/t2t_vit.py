@@ -14,6 +14,7 @@ from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_
 import numpy as np
 from .token_transformer import Token_transformer
+from .token_performer import Token_performer, Token_performer_x
 from .transformer_block import Block, get_sinusoid_encoding, get_sinusoid_encoding_pt
 
 def _cfg(url='', **kwargs):
@@ -65,8 +66,8 @@ class T2T_module(nn.Module):
 
             #self.attention1 = Token_performer(dim=token_dim, in_dim=in_chans*7*7, kernel_ratio=0.5)
             #self.attention2 = Token_performer(dim=token_dim, in_dim=token_dim*3*3, kernel_ratio=0.5)
-            self.attention1 = Token_performer(dim=in_chans*7*7, in_dim=token_dim, kernel_ratio=0.5)
-            self.attention2 = Token_performer(dim=token_dim*3*3, in_dim=token_dim, kernel_ratio=0.5)
+            self.attention1 = Token_performer_x(dim=in_chans*7*7, in_dim=token_dim, kernel_ratio=0.5)
+            self.attention2 = Token_performer_x(dim=token_dim*3*3, in_dim=token_dim, kernel_ratio=0.5)
             self.project = nn.Linear(token_dim * 3 * 3, embed_dim)
 
         elif tokens_type == 'convolution':  # just for comparison with conolution, not our model
