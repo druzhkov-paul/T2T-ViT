@@ -86,14 +86,24 @@ class T2T_module(nn.Module):
         # iteration1: re-structurization/reconstruction
         x = self.attention1(x)
         B, new_HW, C = x.shape
-        x = x.transpose(1,2).reshape(B, C, int(np.sqrt(new_HW)), int(np.sqrt(new_HW)))
+        C = int(C)
+        if torch.onnx.is_in_onnx_export():
+            r = torch.sqrt(new_HW.to(float)).to(int)
+        else:
+            r = int(np.sqrt(new_HW))
+        x = x.transpose(1, 2).reshape(B, C, r, r)
         # iteration1: soft split
         x = self.soft_split1(x).transpose(1, 2)
 
         # iteration2: re-structurization/reconstruction
         x = self.attention2(x)
         B, new_HW, C = x.shape
-        x = x.transpose(1, 2).reshape(B, C, int(np.sqrt(new_HW)), int(np.sqrt(new_HW)))
+        C = int(C)
+        if torch.onnx.is_in_onnx_export():
+            r = torch.sqrt(new_HW.to(float)).to(int)
+        else:
+            r = int(np.sqrt(new_HW))
+        x = x.transpose(1, 2).reshape(B, C, r, r)
         # iteration2: soft split
         x = self.soft_split2(x).transpose(1, 2)
 

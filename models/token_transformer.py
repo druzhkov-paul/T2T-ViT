@@ -38,7 +38,9 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
 
         # skip connection
-        x = v.squeeze(1) + x   # because the original x has different size with current x, use v to do skip connection
+        # v = v.squeeze(1)
+        v = v[:, 0]
+        x = v + x   # because the original x has different size with current x, use v to do skip connection
 
         return x
 
