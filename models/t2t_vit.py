@@ -14,8 +14,7 @@ from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_
 import numpy as np
 from .token_transformer import Token_transformer
-from .token_performer import Token_performer
-from .transformer_block import Block, get_sinusoid_encoding
+from .transformer_block import Block, get_sinusoid_encoding, get_sinusoid_encoding_pt
 
 def _cfg(url='', **kwargs):
     return {
@@ -125,7 +124,7 @@ class T2T_ViT(nn.Module):
         num_patches = self.tokens_to_token.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(data=get_sinusoid_encoding(n_position=num_patches + 1, d_hid=embed_dim), requires_grad=False)
+        self.pos_embed = nn.Parameter(data=get_sinusoid_encoding_pt(n_position=num_patches + 1, d_hid=embed_dim), requires_grad=False)
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -168,7 +167,9 @@ class T2T_ViT(nn.Module):
 
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.pos_embed
+        pos_embd = get_sinusoid_encoding_pt(x.shape[1], x.shape[2]).to(x.device)
+        x = x + pos_embd
+        # x = x + self.pos_embed
         x = self.pos_drop(x)
 
         for blk in self.blocks:

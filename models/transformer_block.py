@@ -87,3 +87,17 @@ def get_sinusoid_encoding(n_position, d_hid):
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
     return torch.FloatTensor(sinusoid_table).unsqueeze(0)
+
+
+def get_sinusoid_encoding_pt(n_position, d_hid):
+    ''' Sinusoid position encoding table '''
+    pos = torch.arange(n_position).reshape(-1, 1).float()
+    dh = torch.pow(10000, 2 * (torch.arange(d_hid) // 2) / d_hid).reshape(1, -1).float()
+    sinusoid_table = pos / dh
+    shape = sinusoid_table.shape
+    sinusoid_table = sinusoid_table.reshape(-1, 2)
+    sinusoid_table = torch.stack([torch.sin(sinusoid_table[..., 0]), torch.cos(sinusoid_table[..., 1])], dim=1)
+    sinusoid_table = sinusoid_table.reshape(1, *shape)
+    # sinusoid_table[:, 0::2] = torch.sin(sinusoid_table[:, 0::2])  # dim 2i
+    # sinusoid_table[:, 1::2] = torch.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+    return sinusoid_table
